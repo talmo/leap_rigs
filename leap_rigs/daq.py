@@ -9,6 +9,7 @@ import motifapi
 from motifapi import MotifApi, MotifError
 
 import nidaqmx
+import nidaqmx.stream_writers
 from nidaqmx.constants import AcquisitionType, TerminalConfiguration
 
 
@@ -70,6 +71,7 @@ class DAQController:
     Attributes:
         ao_trigger: Analog output channel for camera triggering.
         ai_audio: Analog input channels for microphones.
+        ai_exposure: Analog input channel for camera exposure readout.
         ao_opto: Analog output channel for opto stim. If None (the default), no opto
             stimulation is written out.
         ai_opto_loopback: Analog input channel for opto stim loopback. If None (the
@@ -118,6 +120,7 @@ class DAQController:
         self,
         ao_trigger: str,
         ai_audio: str,
+        ai_exposure: str,
         ao_opto: Optional[str] = None,
         ai_opto_loopback: Optional[str] = None,
         data_path: Optional[str] = None,
@@ -240,7 +243,8 @@ class DAQController:
         if not self.is_saving:
             return
 
-        n_expected_samples = self.Fs * 60 * self.expected_duration
+        n_expected_samples = int(self.Fs * 60 * self.expected_duration)
+        print(f"n_expected_samples = {n_expected_samples}")
         self._f = h5py.File(self.data_path, "w")
         self._ds_data = self._f.create_dataset(
             "data",
@@ -252,6 +256,8 @@ class DAQController:
             compression_opts=1,
         )
         print(f"Created HDF5 data file: {self.data_path}")
+        print(self._f)
+        print(self._ds_data)
 
     def callback(
         self,
@@ -277,11 +283,12 @@ class DAQController:
 
         # Get data from task inputs.
         chunk_input_data = np.asarray(self.read_task.read(number_of_samples))
-        if self.save:
+        if self.is_saving:
             # Write to HDF5.
-            self._ds_data[
-                :, self.sample_idx : (self.sample_idx + number_of_samples)
-            ] = chunk_input_data
+            i0 = self.sample_idx
+            i1 = self.sample_idx + number_of_samples
+            # print(f"chunk_input_data.shape = {chunk_input_data.shape}")
+            self._ds_data[:, i0:i1] = chunk_input_data
 
         # Update the row (sample) that we're on.
         self.sample_idx += number_of_samples
@@ -321,6 +328,7 @@ class DAQController:
         self.setup_daq()
         self.setup_saving()
         self.read_task.start()
+        self.trigger_task.start()
 
     def turn_off_opto(self):
         """Send a zero voltage pulse to the opto output to turn off the LED."""
@@ -329,6 +337,8 @@ class DAQController:
 
     def stop(self):
         """Stop opto and clean up the saved output."""
+        self.read_task.stop()
+        self.trigger_task.stop()
         self.turn_off_opto()
         if self.is_saving:
             self._ds_data.resize((self.n_input_channels, self.sample_idx))

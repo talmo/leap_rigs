@@ -1,6 +1,7 @@
 import leap_rigs
 import datetime
 import time
+import numpy as np
 
 
 ##########
@@ -8,7 +9,7 @@ experiment_duration = 30  # minutes
 
 daq_sample_frequency = 10000  # samples/s
 cam_trigger_frequency = 150  # frames/s
-callback_sample_frequency = 250  # samples (determines min opto latency)
+callback_sample_frequency = 300  # samples (determines min opto latency)
 
 cam_sn = "16276625" # MurthyLab-PC05 -> Cam1
 ao_trigger = "Dev1/ao0"
@@ -49,7 +50,7 @@ motif.call('camera/%s/recording/start' % cam_sn,
                  metadata=metadata)
 
 ##########
-stream_poller = leap_rigs.motif.StreamPoller(api=motif_api, camera_sn=cam_sn)
+stream_poller = leap_rigs.motif.StreamPoller(api=motif, camera_sn=cam_sn)
 live_predictor = leap_rigs.tracking.LivePredictor.load_model(model_paths, get_image_fn=lambda: stream_poller.latest_image)
 
 stream_poller.start()
@@ -76,16 +77,23 @@ poses = PoseBuffer()
 
 # opto_stim = leap_rigs.daq.test_opto_stim_fn
 def opto_stim(s0, s1, number_of_samples, chunk_input_data, daq):
-    (img, meta), (pred, lp_timestamp) = lp.last_data_and_prediction
+    # img, md = stream_poller.latest_image
+    # if img is not None:
+    #     print(img.shape)
+    # else:
+    #     print(None)
+    # return 0.0
+    (img, meta), (pred, lp_timestamp) = live_predictor.last_data_and_prediction
     if meta is not None:
-        frame_idx, vr_timestamp = meta
-        latency = lp_timestamp - vr_timestamp
+        # frame_idx, vr_timestamp = meta
+        img_timestamp = meta["timestamp"]
+        latency = lp_timestamp - img_timestamp
 
         poses.update(pred)
         feats = poses.compute_features()
 
         do_trigger = (feats.min_dist < 2) and (np.abs(feats.ang_f_rel_m) < 25)
-        msg = f"min_dist = {feats.min_dist:.1f} mm / ang = {feats.ang_f_rel_m:.1f} / trigger: {do_trigger}"
+        msg = f"latency = {latency*1000:.1f} ms / min_dist = {feats.min_dist:.1f} mm / ang = {feats.ang_f_rel_m:.1f} / trigger: {do_trigger}"
         print(msg)
 
         if do_trigger:
@@ -97,9 +105,11 @@ def opto_stim(s0, s1, number_of_samples, chunk_input_data, daq):
 daq_controller = leap_rigs.daq.DAQController(
     ao_trigger=ao_trigger,
     ai_audio=ai_audio,
+    ai_exposure=ai_exposure,
     ao_opto=ao_opto,
     ai_opto_loopback=ai_opto_loopback,
-    data_path=data_path,
+    # data_path=data_path,
+    data_path=None,
     opto_data=opto_stim,
     daq_sample_frequency=daq_sample_frequency,
     cam_trigger_frequency=cam_trigger_frequency,
@@ -130,6 +140,7 @@ while not done:
     if not done:
         time.sleep(5.0)
         print(f"[t = {time_elapsed / 60:.2f} min] Still recording")
+        # print(stream_poller.is_alive(), live_predictor.is_alive())
 
 total_duration = time.time() - t0
 print("Stopping experiment after %.1f minutes" % (total_duration / 60))

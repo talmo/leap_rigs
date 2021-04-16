@@ -28,8 +28,6 @@ class LivePredictor(threading.Thread):
         metadata: This can be anything and will be stored together with the inference
         results. This can be None if not needed.
 
-        If the returned img is None, the thread will stop running.
-
         Example:
             def dummy_img_fn():
                 return np.zeros((128, 128, 1), dtype="uint8"), None
@@ -113,11 +111,12 @@ class LivePredictor(threading.Thread):
             See last_prediction and last_data_and_prediction.
         """
         t0 = perf_counter()
-        img = np.expand_dims(image, axis=0) if image.ndim == 3 else image
-        pred = self.predictor.inference_model.predict_on_batch(img)
+        image = np.expand_dims(image, axis=-1) if image.ndim == 2 else image
+        image = np.expand_dims(image, axis=0) if image.ndim == 3 else image
+        pred = self.predictor.inference_model.predict_on_batch(image)
         latency = perf_counter() - t0
         with self._lock:
-            self._last_image = img.copy()
+            self._last_image = image.copy()
             self._last_prediction = pred
             self._last_meta = meta
             self._last_timestamp = perf_counter()
@@ -135,8 +134,9 @@ class LivePredictor(threading.Thread):
             img, meta = self.get_image_fn()
 
             if img is None:
-                # Received poison pill, so we're finished.
-                break
+                continue
+            #     # Received poison pill, so we're finished.
+            #     break
 
             # Check if this is a new image.
             # TODO: Compare by metadata could be faster?
