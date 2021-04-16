@@ -16,5 +16,5 @@ dependencies:
     - matplotlib
     - seaborn
     - "git+https://github.com/murthylab/sleap.git@talmo/supervised_id"
-    - "git+https://github.com/loopbio/python-motifapi.git"
+    - "git+https://github.com/murthylab/python-motifapi.git"
     - nidaqmx
