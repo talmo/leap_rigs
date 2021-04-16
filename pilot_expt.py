@@ -2,6 +2,9 @@ import leap_rigs
 import datetime
 import time
 import numpy as np
+import glob
+import os
+import h5py
 
 
 ##########
@@ -44,10 +47,9 @@ motif = leap_rigs.motif.get_motif_remote()
 
 
 # Start camera
-motif.call('camera/%s/recording/start' % cam_sn,
-                 codec='h264-gpu',
-                 filename=f"{expt_name}_{cam_sn}",
-                 metadata=metadata)
+vid_filename = f"{expt_name}_{cam_sn}"
+motif.call("camera/%s/recording/start" % cam_sn, codec="h264-gpu", filename=vid_filename, metadata=metadata)
+print("Started recording camera video")
 
 ##########
 stream_poller = leap_rigs.motif.StreamPoller(api=motif, camera_sn=cam_sn)
@@ -94,7 +96,7 @@ def opto_stim(s0, s1, number_of_samples, chunk_input_data, daq):
 
         do_trigger = (feats.min_dist < 2) and (np.abs(feats.ang_f_rel_m) < 25)
         msg = f"latency = {latency*1000:.1f} ms / min_dist = {feats.min_dist:.1f} mm / ang = {feats.ang_f_rel_m:.1f} / trigger: {do_trigger}"
-        print(msg)
+        # print(msg)
 
         if do_trigger:
             return 3.0
@@ -108,8 +110,8 @@ daq_controller = leap_rigs.daq.DAQController(
     ai_exposure=ai_exposure,
     ao_opto=ao_opto,
     ai_opto_loopback=ai_opto_loopback,
-    # data_path=data_path,
-    data_path=None,
+    data_path=data_path,
+    # data_path=None,
     opto_data=opto_stim,
     daq_sample_frequency=daq_sample_frequency,
     cam_trigger_frequency=cam_trigger_frequency,
@@ -171,3 +173,20 @@ while not done_recording:
         print("Waiting for cameras to finish recording...")
         time.sleep(1)
 
+
+if daq_controller.is_saving:
+    # Move data to final session folder
+    with h5py.File(data_path, "r") as daqF:
+        daq_data = daqF["data"]
+
+        vidSource = glob.glob(f"D:/Motif/{cam_sn}/{vid_filename}*")[0]
+        vidDest = "D:/Motif/" + vid_filename
+        os.rename(vidSource, vidDest)
+
+        with h5py.File(vidDest + "/daq.h5", "w") as f:
+            f.create_dataset("audio",data=daq_data[0:9,:], compression="gzip", compression_opts=1)
+            f.create_dataset("sync",data=daq_data[9,:], compression="gzip", compression_opts=1)
+            if daq_data.shape[0] > 10:
+                f.create_dataset("opto",data=daq_data[10,:], compression="gzip", compression_opts=1)
+
+        print("Moved data to final session folder:", vidDest)
