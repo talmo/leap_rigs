@@ -1,3 +1,21 @@
+"""This script defines the pilot closed loop experiment.
+
+Instructions:
+
+1. Open cmder
+
+2. Go to the right folder and activate environment
+    cd C:\code\leap_rigs
+    activate leap_rigs
+
+Terminal should say this:
+    C:\code\leap_rigs (main -> origin)
+    (leap_rigs) λ
+
+3. Run experiment with:
+    python pilot_expt.py
+"""
+
 import leap_rigs
 import datetime
 import time
@@ -8,7 +26,7 @@ import h5py
 
 
 ##########
-experiment_duration = 5  # minutes
+experiment_duration = 30  # minutes
 
 daq_sample_frequency = 10000  # samples/s
 cam_trigger_frequency = 150  # frames/s
@@ -87,9 +105,11 @@ def opto_stim(s0, s1, number_of_samples, chunk_input_data, daq):
         feats = poses.compute_features()
 
         # Decide trigger based on feature thresholds.
-        do_trigger = (feats.min_dist < 2) and (np.abs(feats.ang_f_rel_m) < 25)
-        
-        msg = f"latency = {latency*1000:.1f} ms / min_dist = {feats.min_dist:.1f} mm / ang = {feats.ang_f_rel_m:.1f} / trigger: {do_trigger}"
+        # do_trigger = (feats.min_dist < 2) and (np.abs(feats.ang_f_rel_m) < 25)
+        # do_trigger = (feats.min_dist < 2) and (np.abs(feats.ang_f_rel_m) < 25) and (np.abs(feats.ang_m_rel_f) > 120)
+        do_trigger = (feats.min_dist < 2) and (np.abs(feats.ang_f_rel_m) < 25) and (np.abs(feats.ang_m_rel_f) > 145)
+
+        msg = f"latency = {latency*1000:.1f} ms / min_dist = {feats.min_dist:.1f} mm / ang_f_rel_m = {feats.ang_f_rel_m:.1f} / ang_m_rel_f = {feats.ang_m_rel_f:.1f} / trigger: {do_trigger}"
         if (time.perf_counter() - t_last_msg) > 1.0:
             print(msg)
             t_last_msg = time.perf_counter()
@@ -101,7 +121,7 @@ def opto_stim(s0, s1, number_of_samples, chunk_input_data, daq):
         # if np.isnan(feats.dist):
         #     dist_norm = 0.
         # else:
-        #     dist_norm = np.clip(feats.dist, 0, 400) / 400 * 5
+        #     dist_norm = (np.clip(feats.dist, 0, 30) / 30 * 4) + 1
         # return dist_norm
     return 0.0
 ##########
