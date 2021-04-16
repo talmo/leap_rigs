@@ -106,6 +106,7 @@ def test_live_viz():
 
 def test_live_inference_viz():
     vr = VideoReader("tests/data/test.mp4", fps=30)
+    # vr = VideoReader(r"D:\Motif\210416_103457_16276625\000000.mp4", fps=30)
     model_paths = [
         "models/centroids.200823_193403.UNet.zip",  # fast
         # "models/centroid.200816_202746.UNet.zip",  # accurate

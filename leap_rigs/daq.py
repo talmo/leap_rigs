@@ -97,7 +97,7 @@ class DAQController:
 
     Notes:
         When the opto_data attribute is specified as a function, this serves as a signal
-        generator. The function will receive some metadata as input as is expected to
+        generator. The function will receive some metadata as input and is expected to
         return a numpy vector of voltages, or a scalar float.
 
         The function will receive these inputs:

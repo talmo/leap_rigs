@@ -134,3 +134,21 @@ def compute_features(pose_f: np.ndarray, pose_m: np.ndarray) -> Features:
         ).squeeze()
 
     return feats
+
+
+class PoseBuffer:
+    def __init__(self):
+        self.last_pose_m = None
+        self.last_pose_f = None
+        self.pose_m = None
+        self.pose_f = None
+
+    def update(self, pred):
+        self.pose_f, self.pose_m = pred["instance_peaks"][0]
+        if self.last_pose_f is None or (~np.isnan(self.pose_f)).any():
+            self.last_pose_f = self.pose_f
+        if self.last_pose_m is None or (~np.isnan(self.pose_m)).any():
+            self.last_pose_m = self.pose_m
+
+    def compute_features(self):
+        return compute_features(self.last_pose_f, self.last_pose_m)

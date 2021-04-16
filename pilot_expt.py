@@ -8,11 +8,11 @@ import h5py
 
 
 ##########
-experiment_duration = 30  # minutes
+experiment_duration = 5  # minutes
 
 daq_sample_frequency = 10000  # samples/s
 cam_trigger_frequency = 150  # frames/s
-callback_sample_frequency = 300  # samples (determines min opto latency)
+callback_sample_frequency = 250  # samples (determines min opto latency)
 
 cam_sn = "16276625" # MurthyLab-PC05 -> Cam1
 ao_trigger = "Dev1/ao0"
@@ -58,27 +58,15 @@ live_predictor = leap_rigs.tracking.LivePredictor.load_model(model_paths, get_im
 stream_poller.start()
 live_predictor.start()
 
-class PoseBuffer:
-    def __init__(self):
-        self.last_pose_m = None
-        self.last_pose_f = None
-        self.pose_m = None
-        self.pose_f = None
-
-    def update(self, pred):
-        self.pose_f, self.pose_m = pred["instance_peaks"][0]
-        if self.last_pose_f is None or (~np.isnan(self.pose_f)).any():
-            self.last_pose_f = self.pose_f
-        if self.last_pose_m is None or (~np.isnan(self.pose_m)).any():
-            self.last_pose_m = self.pose_m
-
-    def compute_features(self):
-        return leap_rigs.flies.compute_features(self.last_pose_f, self.last_pose_m)
-
-poses = PoseBuffer()
+poses = leap_rigs.flies.PoseBuffer()
 
 # opto_stim = leap_rigs.daq.test_opto_stim_fn
+t_last_msg = time.perf_counter()
+latencies = []
+pose_preds = []
+pose_samples = []
 def opto_stim(s0, s1, number_of_samples, chunk_input_data, daq):
+    global t_last_msg
     # img, md = stream_poller.latest_image
     # if img is not None:
     #     print(img.shape)
@@ -90,16 +78,31 @@ def opto_stim(s0, s1, number_of_samples, chunk_input_data, daq):
         # frame_idx, vr_timestamp = meta
         img_timestamp = meta["timestamp"]
         latency = lp_timestamp - img_timestamp
+        latencies.append(latency)
+        pose_preds.append(pred["instance_peaks"][0].copy())
+        pose_samples.append(s0)
 
+        # Update pose buffer and compute features.
         poses.update(pred)
         feats = poses.compute_features()
 
+        # Decide trigger based on feature thresholds.
         do_trigger = (feats.min_dist < 2) and (np.abs(feats.ang_f_rel_m) < 25)
+        
         msg = f"latency = {latency*1000:.1f} ms / min_dist = {feats.min_dist:.1f} mm / ang = {feats.ang_f_rel_m:.1f} / trigger: {do_trigger}"
-        # print(msg)
+        if (time.perf_counter() - t_last_msg) > 1.0:
+            print(msg)
+            t_last_msg = time.perf_counter()
 
         if do_trigger:
             return 3.0
+
+        # Encode distance in opto output
+        # if np.isnan(feats.dist):
+        #     dist_norm = 0.
+        # else:
+        #     dist_norm = np.clip(feats.dist, 0, 400) / 400 * 5
+        # return dist_norm
     return 0.0
 ##########
 
@@ -113,6 +116,7 @@ daq_controller = leap_rigs.daq.DAQController(
     data_path=data_path,
     # data_path=None,
     opto_data=opto_stim,
+    # opto_data=0.,
     daq_sample_frequency=daq_sample_frequency,
     cam_trigger_frequency=cam_trigger_frequency,
     callback_sample_frequency=callback_sample_frequency,
@@ -151,6 +155,9 @@ print("Stopping experiment after %.1f minutes" % (total_duration / 60))
 daq_controller.stop()
 print("Stopped triggering")
 
+if len(latencies) > 0:
+    print(f"Latencies: {np.mean(latencies)*1000:.1f} ms / Max: {max(latencies)*1000:.1f} ms / Min: {min(latencies)*1000:.1f} ms")
+
 # Send stop signal to cameras
 for cam in [cam_sn]:
     motif.call('camera/%s/recording/stop' % cam)
@@ -175,18 +182,32 @@ while not done_recording:
 
 
 if daq_controller.is_saving:
+    time.sleep(3)
+
     # Move data to final session folder
     with h5py.File(data_path, "r") as daqF:
         daq_data = daqF["data"]
 
-        vidSource = glob.glob(f"D:/Motif/{cam_sn}/{vid_filename}*")[0]
         vidDest = "D:/Motif/" + vid_filename
-        os.rename(vidSource, vidDest)
+
+        for _ in range(3):
+            try:
+                vidSource = glob.glob(f"D:/Motif/{cam_sn}/{vid_filename}*")[0]
+                os.rename(vidSource, vidDest)
+                break
+            except:
+                time.sleep(3)
 
         with h5py.File(vidDest + "/daq.h5", "w") as f:
             f.create_dataset("audio",data=daq_data[0:9,:], compression="gzip", compression_opts=1)
             f.create_dataset("sync",data=daq_data[9,:], compression="gzip", compression_opts=1)
             if daq_data.shape[0] > 10:
-                f.create_dataset("opto",data=daq_data[10,:], compression="gzip", compression_opts=1)
+                f.create_dataset("opto", data=daq_data[10,:], compression="gzip", compression_opts=1)
+            if len(latencies) > 0:
+                f.create_dataset("pose_latencies", data=np.array(latencies), compression="gzip", compression_opts=1)
+            if len(pose_preds) > 0:
+                f.create_dataset("pose_preds", data=np.array(pose_preds), compression="gzip", compression_opts=1)
+            if len(latencies) > 0:
+                f.create_dataset("pose_samples", data=np.array(pose_samples), compression="gzip", compression_opts=1)
 
         print("Moved data to final session folder:", vidDest)
