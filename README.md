@@ -33,6 +33,6 @@ To update, just `git pull` to grab new changes.
 2. Run the experiment script you want to use: `python pilot_expt.py`
 
 
-See [`pilot_expt.py`](https://github.com/murthylab/leap_rigs/main/pilot_expt.py) for a test experiment setup.
+See [`pilot_expt.py`](https://github.com/murthylab/leap_rigs/blob/main/pilot_expt.py) for a test experiment setup.
 
-See [`sandbox.py`](https://github.com/murthylab/leap_rigs/main/sandbox.py) for ad-hoc usage.
+See [`sandbox.py`](https://github.com/murthylab/leap_rigs/blob/main/sandbox.py) for ad-hoc usage.
