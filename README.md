@@ -1,10 +1,10 @@
 leap_rigs
----------
+=========
 
 This repository contains code for running experiments on the LEAP rigs, including open and closed-loop optogenetic stimulation and realtime SLEAP inference.
 
 
-# Installation
+## Installation
 
 1. Install Anaconda or [Miniconda](https://docs.conda.io/en/latest/miniconda.html).
 2. Clone this repo and create the environment:
@@ -28,7 +28,7 @@ To update, just `git pull` to grab new changes.
 **Note:** This will *not* install the scripts as a package, so you must be in this directory to run the experiment scripts.
 
 
-# Usage
+## Usage
 1. Activate the environment: `conda activate leap_rigs`
 2. Run the experiment script you want to use: `python pilot_expt.py`
 
