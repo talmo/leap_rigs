@@ -330,15 +330,24 @@ class DAQController:
         self.read_task.start()
         self.trigger_task.start()
 
+    def start_triggering(self):
+        self.trigger_task.start()
+
+    def start_saving(self):
+        self.read_task.start()
+
+    def stop_triggering(self):
+        self.trigger_task.stop()
+
     def turn_off_opto(self):
         """Send a zero voltage pulse to the opto output to turn off the LED."""
         if self.opto_task is not None:
             self.opto_task.write(0.0, auto_start=True)
 
-    def stop(self):
+    def stop_saving(self):
         """Stop opto and clean up the saved output."""
         self.read_task.stop()
-        self.trigger_task.stop()
+        # self.trigger_task.stop()
         self.turn_off_opto()
         if self.is_saving:
             self._ds_data.resize((self.n_input_channels, self.sample_idx))

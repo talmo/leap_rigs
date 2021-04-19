@@ -144,9 +144,17 @@ daq_controller = leap_rigs.daq.DAQController(
 )
 
 
-# Start DAQ and triggering
-daq_controller.start()
-time.sleep(1.5)
+# daq_controller.start()
+daq_controller.setup_daq()
+daq_controller.setup_saving()
+print("Setup DAQ and saving")
+
+# Start DAQ and triggering after a delay
+daq_controller.start_saving()
+print("Started saving")
+time.sleep(2.5)
+daq_controller.start_triggering()
+print("Started triggering")
 
 
 t0 = time.time()
@@ -172,7 +180,8 @@ total_duration = time.time() - t0
 print("Stopping experiment after %.1f minutes" % (total_duration / 60))
 
 # Stop triggering
-daq_controller.stop()
+# daq_controller.stop()
+daq_controller.stop_triggering()
 print("Stopped triggering")
 
 if len(latencies) > 0:
@@ -200,6 +209,9 @@ while not done_recording:
         print("Waiting for cameras to finish recording...")
         time.sleep(1)
 
+time.sleep(2.5)
+daq_controller.stop_saving()
+print("Stopped saving")
 
 if daq_controller.is_saving:
     time.sleep(3)
@@ -214,6 +226,7 @@ if daq_controller.is_saving:
             try:
                 vidSource = glob.glob(f"D:/Motif/{cam_sn}/{vid_filename}*")[0]
                 os.rename(vidSource, vidDest)
+                print(f"Moved: {vidSource} -> {vidDest}")
                 break
             except:
                 time.sleep(3)
@@ -221,13 +234,18 @@ if daq_controller.is_saving:
         with h5py.File(vidDest + "/daq.h5", "w") as f:
             f.create_dataset("audio",data=daq_data[0:9,:], compression="gzip", compression_opts=1)
             f.create_dataset("sync",data=daq_data[9,:], compression="gzip", compression_opts=1)
+            print("Saved audio and sync")
             if daq_data.shape[0] > 10:
                 f.create_dataset("opto", data=daq_data[10,:], compression="gzip", compression_opts=1)
+                print("Saved opto outputs")
             if len(latencies) > 0:
                 f.create_dataset("pose_latencies", data=np.array(latencies), compression="gzip", compression_opts=1)
+                print("Saved pose latencies")
             if len(pose_preds) > 0:
                 f.create_dataset("pose_preds", data=np.array(pose_preds), compression="gzip", compression_opts=1)
+                print("Saved pose predictions")
             if len(latencies) > 0:
                 f.create_dataset("pose_samples", data=np.array(pose_samples), compression="gzip", compression_opts=1)
+                print("Saved pose sample inds")
 
         print("Moved data to final session folder:", vidDest)
