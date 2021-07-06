@@ -47,8 +47,9 @@ def make_multichan_trigger_task(
 def make_independent_trigger_task(
     chan, freq, duty=0.5, low=0, high=3, auto_start=True, task=None
 ) -> nidaqmx.Task:
-    """Make an independent (single channel) triggering task."""
-    return make_multichan_trigger_task([chan], freq, duty, low, high, auto_start, task)
+    """Make an independent (single or multi-channel) triggering task."""
+    chan = [chan] if type(chan) != list else chan
+    return make_multichan_trigger_task(chan, freq, duty, low, high, auto_start, task)
 
 
 def make_constant_value_task(v, channel, auto_start=False, task=None) -> nidaqmx.Task:
@@ -56,7 +57,9 @@ def make_constant_value_task(v, channel, auto_start=False, task=None) -> nidaqmx
     if task is None:
         task = nidaqmx.Task()
 
-    task.ao_channels.add_ao_voltage_chan(channel)
+    channel = [channel] if type(channel) != list else channel
+    for chan in channel:
+        task.ao_channels.add_ao_voltage_chan(chan)
     task.write(v)
 
     if auto_start:
@@ -142,22 +145,35 @@ class DAQController:
         self.callback_sample_frequency = callback_sample_frequency
         self.expected_duration = expected_duration
 
+        self.ao_trigger = [self.ao_trigger] if type(self.ao_trigger) != list else self.ao_trigger
+        self.ai_audio = [self.ai_audio] if type(self.ai_audio) != list else self.ai_audio
+        self.ai_exposure = [self.ai_exposure] if type(self.ai_exposure) != list else self.ai_exposure
+        self.ao_opto = [self.ao_opto] if type(self.ao_opto) != list else self.ao_opto
+        self.ai_opto_loopback = [self.ai_opto_loopback] if type(self.ai_opto_loopback) != list else self.ai_opto_loopback
+
         self.read_task = None
         self.trigger_task = None
-        self.opto_task = None
+        self.opto_tasks = []
         self._f = None
         self._ds_data = None
         self.sample_idx = 0
+        self.channel_map = []
 
-        self.opto_data = opto_data
-        if type(opto_data) == str:
-            if opto_data.endswith(".mat"):
-                from scipy.io import loadmat
+        self.opto_data = [opto_data] if type(opto_data) != list else opto_data
+        if len(self.opto_data) != len(self.ao_opto):
+            # Make sure we have a copy for each AO if only one opto data source was provided.
+            self.opto_data = [self.opto_data] * len(self.ao_opto)
 
-                self.opto_data = loadmat(opto_data)["stim"].squeeze().astype("float64")
-                print(f"Loaded opto_data ({opto_data}): {len(self.opto_data)} samples")
-            else:
-                raise ValueError("Paths to opto stimulation data must end in '.mat'.")
+        for i in range(len(self.opto_data)):
+            if type(self.opto_data[i]) == str:
+                if self.opto_data[i].endswith(".mat"):
+                    # Preload mat file
+                    from scipy.io import loadmat
+                    mat_filename = self.opto_data[i]
+                    self.opto_data[i] = loadmat(mat_filename)["stim"].squeeze().astype("float64")
+                    print(f"Loaded opto_data ({mat_filename}): {len(self.opto_data[i])} samples")
+                else:
+                    raise ValueError("Paths to opto stimulation data must end in '.mat'.")
 
     @property
     def Fs(self) -> int:
@@ -172,41 +188,60 @@ class DAQController:
     @property
     def is_writing_opto(self) -> bool:
         """Return whether opto stim writing is enabled."""
-        return self.ao_opto is not None
+        # return self.ao_opto is not None
+        return any([ao is not None for ao in self.ao_opto])
 
     @property
     def is_reading_opto(self) -> bool:
         """Return whether opto loopback reading is enabled."""
-        return self.ai_opto_loopback is not None
+        # return self.ai_opto_loopback is not None
+        return any([ai is not None for ai in self.ai_opto_loopback])
 
     def setup_daq(self):
         """Set up DAQ tasks for reading and writing."""
-        if self.read_task is not None:
-            return
+        # if self.read_task is not None:
+            # return
 
+        # if self.read_task is None:
+        # Create reading task (this is exclusive per device)
         self.read_task = nidaqmx.Task()
 
         # Audio channels
-        self.read_task.ai_channels.add_ai_voltage_chan(
-            self.ai_audio,
-            min_val=-10.0,
-            max_val=10.0,
-            terminal_config=TerminalConfiguration.NRSE,
-        )
-        print(f"Added audio input channels: {self.ai_audio}")
+        channel_offset = 0
+        for c, ai_audio in enumerate(self.ai_audio):
+            if ai_audio is None:
+                continue
+            self.read_task.ai_channels.add_ai_voltage_chan(
+                ai_audio,
+                min_val=-10.0,
+                max_val=10.0,
+                terminal_config=TerminalConfiguration.NRSE,
+            )
+            print(f"Added audio input channels: {ai_audio}")
+            n_channels = len(self.read_task.ai_channels.channel_names)
+            self.channel_map.extend([f"audio{i}.cam{c}" for i in range(n_channels - channel_offset)])
+            channel_offset = n_channels
 
         # Camera exposure readout
-        self.read_task.ai_channels.add_ai_voltage_chan(
-            self.ai_exposure, min_val=0.0, max_val=5.0
-        )
-        print(f"Added camera exposure input channel: {self.ai_exposure}")
-
-        if self.is_reading_opto:
-            # Opto loopback
+        for c, ai_exposure in enumerate(self.ai_exposure):
+            if ai_exposure is None:
+                continue
             self.read_task.ai_channels.add_ai_voltage_chan(
-                self.ai_opto_loopback, min_val=0.0, max_val=10.0
+                ai_exposure, min_val=0.0, max_val=5.0
             )
-            print(f"Added opto loopback input channel: {self.ai_opto_loopback}")
+            print(f"Added camera exposure input channel: {ai_exposure}")
+            self.channel_map.append(f"exposure.cam{c}")
+
+        # Opto loopback
+        if self.is_reading_opto:
+            for c, ai_opto_loopback in enumerate(self.ai_opto_loopback):
+                if ai_opto_loopback is None:
+                    continue
+                self.read_task.ai_channels.add_ai_voltage_chan(
+                    ai_opto_loopback, min_val=0.0, max_val=10.0
+                )
+                print(f"Added opto loopback input channel: {ai_opto_loopback}")
+                self.channel_map.append(f"opto_loopback.cam{c}")
 
         # Set sampling rate on the DAQ
         self.read_task.timing.cfg_samp_clk_timing(
@@ -225,13 +260,15 @@ class DAQController:
             self.ao_trigger, self.cam_trigger_frequency, duty=0.1, auto_start=False
         )
         print(
-            f"Added camera triggering channel: {self.ao_trigger} at {self.cam_trigger_frequency} FPS"
+            f"Added camera triggering channels: {self.ao_trigger} at {self.cam_trigger_frequency} FPS"
         )
 
         # Opto stim
         if self.is_writing_opto:
-            self.opto_task = make_constant_value_task(0.0, self.ao_opto)
-            print(f"Added opto triggering channel: {self.ao_opto}")
+            self.opto_tasks = []
+            for ao_opto in self.ao_opto:
+                self.opto_tasks.append(make_constant_value_task(0.0, ao_opto))
+                print(f"Added opto triggering channels: {ao_opto}")
 
     @property
     def n_input_channels(self) -> int:
@@ -293,33 +330,38 @@ class DAQController:
         # Update the row (sample) that we're on.
         self.sample_idx += number_of_samples
 
-        if self.opto_task is None:
-            # No opto task, so just return early.
+        if not self.is_writing_opto:
+            # Not writing opto, so just return early.
             return 0
 
-        # Get the stimulation data.
-        if callable(self.opto_data):
-            stim = self.opto_data(
-                s0=s0,
-                s1=s1,
-                number_of_samples=number_of_samples,
-                chunk_input_data=chunk_input_data,
-                daq=self,
-            )
-        else:
-            stim = self.opto_data
+        for opto_task, opto_data in zip(self.opto_tasks, self.opto_data):
+            if opto_task is None:
+                # No opto task, so just skip.
+                continue
 
-        if stim is None:
-            # No stim, so just do nothing.
-            return 0
+            # Get the stimulation data.
+            if callable(opto_data):
+                stim = opto_data(
+                    s0=s0,
+                    s1=s1,
+                    number_of_samples=number_of_samples,
+                    chunk_input_data=chunk_input_data,
+                    daq=self,
+                )
+            else:
+                stim = opto_data
 
-        if not np.isscalar(stim) and len(stim) != number_of_samples:
-            # Index into a stimulus vector (wraps around if vector is too short)
-            next_s0, next_s1 = s1, s1 + number_of_samples
-            stim = np.take(self.opto_data, range(next_s0, next_s1), mode="wrap")
+            if stim is None:
+                # No stim, so just do nothing.
+                return 0
 
-        # Write stim to opto channel.
-        self.opto_task.write(stim, auto_start=True)
+            if not np.isscalar(stim) and len(stim) != number_of_samples:
+                # Index into a stimulus vector (wraps around if vector is too short)
+                next_s0, next_s1 = s1, s1 + number_of_samples
+                stim = np.take(opto_data, range(next_s0, next_s1), mode="wrap")
+
+            # Write stim to opto channel.
+            opto_task.write(stim, auto_start=True)
 
         return 0
 
@@ -341,17 +383,37 @@ class DAQController:
 
     def turn_off_opto(self):
         """Send a zero voltage pulse to the opto output to turn off the LED."""
-        if self.opto_task is not None:
-            self.opto_task.write(0.0, auto_start=True)
+        for opto_task in self.opto_tasks:
+            if opto_task is not None:
+                opto_task.write(0.0, auto_start=True)
+                opto_task.stop()
 
     def stop_saving(self):
         """Stop opto and clean up the saved output."""
         self.read_task.stop()
-        # self.trigger_task.stop()
         self.turn_off_opto()
+        # self.trigger_task.stop()
         if self.is_saving:
             self._ds_data.resize((self.n_input_channels, self.sample_idx))
             self._f.close()
+
+    def get_tasks(self):
+        tasks = {"read": self.read_task, "trigger": self.trigger_task}
+        for i, task in enumerate(self.opto_tasks):
+            tasks[f"opto_{i}"] = task
+        return tasks
+
+    def check_tasks(self):
+        tasks = self.get_tasks()
+        for name, task in tasks.items():
+            is_closed = task._handle is None
+            print(f"Task {name} closed: {is_closed}")
+
+    def close_all_tasks(self):
+        for name, task in self.get_tasks().items():
+            if task._handle is not None:
+                print(f"Closing task: {name}")
+                task.close()
 
 
 def test_opto_stim_fn(s0, s1, number_of_samples, chunk_input_data, daq):
